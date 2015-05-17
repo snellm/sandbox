@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import static com.snell.michael.sandbox.entrainedsupplier.ThreadUtil.latchAwait;
 import static org.junit.Assert.assertEquals;
 
 public class EntrainedSupplierTest {
@@ -30,7 +31,7 @@ public class EntrainedSupplierTest {
             releaseValueLock.lock();
             valueCalculatedCount.getAndIncrement();
             releaseValueLock.unlock();
-            return EXPECTED_RESULT;
+            return EXPECTED_RESULT + valueCalculatedCount.get();
         });
 
         for (int repeat = 0; repeat < repeatCount; repeat++) {
@@ -39,27 +40,18 @@ public class EntrainedSupplierTest {
 
             for (int thread = 0; thread < threadCount; thread++) {
                 new Thread(() -> {
-                    assertEquals(EXPECTED_RESULT, supplier.get());
+                    assertEquals(EXPECTED_RESULT + (valueCalculatedCount.get() + 1), supplier.get());
                     threadsCompleteLatch.countDown();
                 }, "repeat-"+ repeat + "-thread-" + thread).start();
             }
 
-            supplier.awaitWaitingCount(threadCount - 1);
+            supplier.awaitWaitingThreadCount(threadCount - 1);
 
             releaseValueLock.unlock();
-            await(threadsCompleteLatch);
+            latchAwait(threadsCompleteLatch);
 
             assertEquals(repeat + 1, valueCalculatedCount.get());
 
-        }
-    }
-
-    // TODO Read up on best approach
-    private static void await(CountDownLatch latch) {
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            throw new RuntimeException("Interrupted", e);
         }
     }
 }

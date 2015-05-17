@@ -3,13 +3,15 @@ package com.snell.michael.sandbox.entrainedsupplier;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.Supplier;
 
+import static com.snell.michael.sandbox.entrainedsupplier.ThreadUtil.latchAwait;
+
 public class EntrainedSupplier<T> implements Supplier<T> {
     private final Supplier<T> supplier;
 
-    private boolean alreadyRunning = false;
-    private int waitingCount = 0;
-    private CountDownLatch valueObtainedLatch = null;
+    private boolean anotherThreadRunning = false;
+    private int waitingThreadCount = 0;
     private T sharedValue = null;
+    private CountDownLatch valueObtainedLatch = null;
 
     public EntrainedSupplier(Supplier<T> supplier) {
         this.supplier = supplier;
@@ -17,58 +19,64 @@ public class EntrainedSupplier<T> implements Supplier<T> {
 
     @Override
     public T get() {
-        boolean currentThreadWillRun;
-        synchronized (this) {
-            if (!alreadyRunning) {
-                currentThreadWillRun = true;
-                alreadyRunning = true;
-                waitingCount = 0;
-                valueObtainedLatch = new CountDownLatch(1);
-            } else {
-                currentThreadWillRun = false;
-                waitingCount++;
-                notify();
-            }
-        }
-
-        if (currentThreadWillRun) {
-            T value = supplier.get();
-            synchronized (this) {
-                sharedValue = value;
-                valueObtainedLatch.countDown();
-                awaitWaitingCount(0);
-                alreadyRunning = false;
-                sharedValue = null;
-            }
-            return value;
+        if (currentThreadWillObtainValue()) {
+            return obtainAndDistributeValue();
         } else {
-            awaitValue();
-            synchronized (this) {
-                T value = sharedValue;
-                waitingCount--;
-                if (waitingCount == 0) {
-                    notify();
-                }
-                return value;
-            }
+            return awaitAndRetrieveValue();
         }
     }
 
-    synchronized void awaitWaitingCount(int expectedWaitingCount) {
-        while (waitingCount != expectedWaitingCount) {
+    private T obtainAndDistributeValue() {
+        T value = supplier.get();
+        synchronized (this) {
+            sharedValue = value;
+            valueObtainedLatch.countDown();
+            awaitWaitingThreadCount(0);
+            anotherThreadRunning = false;
+            sharedValue = null;
+        }
+        return value;
+    }
+
+    private T awaitAndRetrieveValue() {
+        latchAwait(valueObtainedLatch);
+        synchronized (this) {
+            T value = sharedValue;
+            decrementWaitingThreadCount();
+            return value;
+        }
+    }
+
+    private synchronized boolean currentThreadWillObtainValue() {
+        if (!anotherThreadRunning) {
+            anotherThreadRunning = true;
+            valueObtainedLatch = new CountDownLatch(1);
+            return true;
+        } else {
+            incrementWaitingThreadCount();
+            return false;
+        }
+    }
+
+    private synchronized void incrementWaitingThreadCount() {
+        waitingThreadCount++;
+        notify();
+    }
+
+    private synchronized void decrementWaitingThreadCount() {
+        waitingThreadCount--;
+        if (waitingThreadCount == 0) {
+            notify();
+        }
+    }
+
+    synchronized void awaitWaitingThreadCount(int expectedWaitingCount) {
+        while (waitingThreadCount != expectedWaitingCount) {
             try {
                 wait();
             } catch (InterruptedException e) {
-                throw new RuntimeException("Interrupted", e);
+                Thread.currentThread().interrupt();
             }
-        }
-    }
-
-    private void awaitValue() {
-        try {
-            valueObtainedLatch.await();
-        } catch (InterruptedException e) {
-            throw new RuntimeException("Interrupted", e);
         }
     }
 }
