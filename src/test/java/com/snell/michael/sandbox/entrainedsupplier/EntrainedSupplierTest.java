@@ -8,6 +8,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import static com.snell.michael.sandbox.entrainedsupplier.ThreadUtil.latchAwait;
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.junit.Assert.assertEquals;
 
 public class EntrainedSupplierTest {
@@ -15,7 +16,7 @@ public class EntrainedSupplierTest {
 
     @Test
     public void callSupplier() {
-        EntrainedSupplier<String> supplier = new EntrainedSupplier<>(() -> EXPECTED_RESULT);
+        EntrainedSupplier<String> supplier = new EntrainedSupplier<>(() -> EXPECTED_RESULT, 1, MINUTES);
 
         assertEquals(EXPECTED_RESULT, supplier.get());
     }
@@ -32,7 +33,7 @@ public class EntrainedSupplierTest {
             valueCalculatedCount.getAndIncrement();
             releaseValueLock.unlock();
             return EXPECTED_RESULT + valueCalculatedCount.get();
-        });
+        }, 1, MINUTES);
 
         for (int repeat = 0; repeat < repeatCount; repeat++) {
             releaseValueLock.lock();
@@ -51,7 +52,6 @@ public class EntrainedSupplierTest {
             latchAwait(threadsCompleteLatch);
 
             assertEquals(repeat + 1, valueCalculatedCount.get());
-
         }
     }
 }

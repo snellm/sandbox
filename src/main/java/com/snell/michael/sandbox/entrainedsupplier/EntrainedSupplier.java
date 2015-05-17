@@ -1,20 +1,25 @@
 package com.snell.michael.sandbox.entrainedsupplier;
 
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
-import static com.snell.michael.sandbox.entrainedsupplier.ThreadUtil.latchAwait;
+import static java.lang.Thread.currentThread;
 
 public class EntrainedSupplier<T> implements Supplier<T> {
     private final Supplier<T> supplier;
+    private final long timeout;
+    private final TimeUnit timeUnit;
 
     private boolean anotherThreadRunning = false;
     private int waitingThreadCount = 0;
     private T sharedValue = null;
     private CountDownLatch valueObtainedLatch = null;
 
-    public EntrainedSupplier(Supplier<T> supplier) {
+    public EntrainedSupplier(Supplier<T> supplier, long timeout, TimeUnit timeUnit) {
         this.supplier = supplier;
+        this.timeout = timeout;
+        this.timeUnit = timeUnit;
     }
 
     @Override
@@ -39,12 +44,20 @@ public class EntrainedSupplier<T> implements Supplier<T> {
     }
 
     private T awaitAndRetrieveValue() {
-        latchAwait(valueObtainedLatch);
-        synchronized (this) {
-            T value = sharedValue;
-            decrementWaitingThreadCount();
-            return value;
+        try {
+            if (valueObtainedLatch.await(timeout, timeUnit)) {
+                synchronized (this) {
+                    T value = sharedValue;
+                    decrementWaitingThreadCount();
+                    return value;
+                }
+            } else {
+                throw new RuntimeException("Timed out waiting for value");
+            }
+        } catch (InterruptedException e) {
+            throw new RuntimeException("Interruted", e);
         }
+
     }
 
     private synchronized boolean currentThreadWillObtainValue() {
@@ -75,7 +88,7 @@ public class EntrainedSupplier<T> implements Supplier<T> {
             try {
                 wait();
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                currentThread().interrupt();
             }
         }
     }
