@@ -18,31 +18,38 @@ public class EntrainedSupplierTest {
     }
 
     @Test
-    public void nestedSupplierCalledOnce() {
-        CountDownLatch releaseValueLatch = new CountDownLatch(1);
-        CountDownLatch threadsCompleteLatch = new CountDownLatch(2);
-        AtomicInteger valueCalculated = new AtomicInteger(0);
-        EntrainedSupplier<String> supplier = new EntrainedSupplier<>(() -> {
-            await(releaseValueLatch);
-            valueCalculated.getAndIncrement();
-            return EXPECTED_RESULT;
-        });
+    public void supplierCalledOncePerSetOfThreads() {
+        AtomicInteger valueCalculatedCount = new AtomicInteger(0);
 
-        new Thread(() -> {
-            assertEquals(EXPECTED_RESULT, supplier.get());
-            threadsCompleteLatch.countDown();
-        }).start();
+        int repeatCount = 1000;
+        for (int repeat = 0; repeat < repeatCount; repeat++) {
+            int threadCount = 1000;
+            CountDownLatch releaseValueLatch = new CountDownLatch(1);
+            CountDownLatch threadsCompleteLatch = new CountDownLatch(threadCount);
+            EntrainedSupplier<String> supplier = new EntrainedSupplier<>(() -> {
+                await(releaseValueLatch);
+                valueCalculatedCount.getAndIncrement();
+                return EXPECTED_RESULT;
+            });
 
-        new Thread(() -> {
-            assertEquals(EXPECTED_RESULT, supplier.get());
-            threadsCompleteLatch.countDown();
-        }).start();
+            for (int thread = 0; thread < threadCount; thread++) {
+                new Thread(() -> {
+                    assertEquals(EXPECTED_RESULT, supplier.get());
+                    threadsCompleteLatch.countDown();
+                }, "repeat-"+ repeat + "-thread-" + thread).start();
+            }
 
-        releaseValueLatch.countDown();
+            // Wait for all threads to be waiting on value
+            while (supplier.getWaitingCount() < threadCount - 1) {
+                Thread.yield();
+            }
 
-        await(threadsCompleteLatch);
+            releaseValueLatch.countDown();
 
-        assertEquals(1, valueCalculated.get());
+            await(threadsCompleteLatch);
+
+            assertEquals(repeat + 1, valueCalculatedCount.get());
+        }
     }
 
     // TODO Read up on best approach
