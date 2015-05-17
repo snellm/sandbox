@@ -31,6 +31,17 @@ public class EntrainedSupplier<T> implements Supplier<T> {
         }
     }
 
+    private synchronized boolean currentThreadWillObtainValue() {
+        if (!anotherThreadRunning) {
+            anotherThreadRunning = true;
+            valueObtainedLatch = new CountDownLatch(1);
+            return true;
+        } else {
+            incrementWaitingThreadCount();
+            return false;
+        }
+    }
+
     private T obtainAndDistributeValue() {
         T value = supplier.get();
         synchronized (this) {
@@ -58,17 +69,6 @@ public class EntrainedSupplier<T> implements Supplier<T> {
             throw new RuntimeException("Interruted", e);
         }
 
-    }
-
-    private synchronized boolean currentThreadWillObtainValue() {
-        if (!anotherThreadRunning) {
-            anotherThreadRunning = true;
-            valueObtainedLatch = new CountDownLatch(1);
-            return true;
-        } else {
-            incrementWaitingThreadCount();
-            return false;
-        }
     }
 
     private synchronized void incrementWaitingThreadCount() {
