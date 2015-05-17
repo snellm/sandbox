@@ -4,6 +4,8 @@ import org.junit.Test;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static org.junit.Assert.assertEquals;
 
@@ -19,18 +21,21 @@ public class EntrainedSupplierTest {
 
     @Test
     public void supplierCalledOncePerSetOfThreads() {
-        AtomicInteger valueCalculatedCount = new AtomicInteger(0);
+        final int repeatCount = 1000;
+        final int threadCount = 10;
 
-        int repeatCount = 1000;
+        AtomicInteger valueCalculatedCount = new AtomicInteger(0);
+        Lock releaseValueLock = new ReentrantLock();
+        EntrainedSupplier<String> supplier = new EntrainedSupplier<>(() -> {
+            releaseValueLock.lock();
+            valueCalculatedCount.getAndIncrement();
+            releaseValueLock.unlock();
+            return EXPECTED_RESULT;
+        });
+
         for (int repeat = 0; repeat < repeatCount; repeat++) {
-            int threadCount = 1000;
-            CountDownLatch releaseValueLatch = new CountDownLatch(1);
+            releaseValueLock.lock();
             CountDownLatch threadsCompleteLatch = new CountDownLatch(threadCount);
-            EntrainedSupplier<String> supplier = new EntrainedSupplier<>(() -> {
-                await(releaseValueLatch);
-                valueCalculatedCount.getAndIncrement();
-                return EXPECTED_RESULT;
-            });
 
             for (int thread = 0; thread < threadCount; thread++) {
                 new Thread(() -> {
@@ -39,16 +44,13 @@ public class EntrainedSupplierTest {
                 }, "repeat-"+ repeat + "-thread-" + thread).start();
             }
 
-            // Wait for all threads to be waiting on value
-            while (supplier.getWaitingCount() < threadCount - 1) {
-                Thread.yield();
-            }
+            supplier.awaitWaitingCount(threadCount - 1);
 
-            releaseValueLatch.countDown();
-
+            releaseValueLock.unlock();
             await(threadsCompleteLatch);
 
             assertEquals(repeat + 1, valueCalculatedCount.get());
+
         }
     }
 

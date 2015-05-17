@@ -1,7 +1,6 @@
 package com.snell.michael.sandbox.entrainedsupplier;
 
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 public class EntrainedSupplier<T> implements Supplier<T> {
@@ -10,7 +9,7 @@ public class EntrainedSupplier<T> implements Supplier<T> {
     private boolean alreadyRunning = false;
     private int waitingCount = 0;
     private CountDownLatch valueObtainedLatch = null;
-    private AtomicReference<T> valueReference = new AtomicReference<>();
+    private T sharedValue = null;
 
     public EntrainedSupplier(Supplier<T> supplier) {
         this.supplier = supplier;
@@ -28,40 +27,41 @@ public class EntrainedSupplier<T> implements Supplier<T> {
             } else {
                 currentThreadWillRun = false;
                 waitingCount++;
+                notify();
             }
         }
 
         if (currentThreadWillRun) {
-            T obtainedValue = supplier.get();
-            valueReference.set(obtainedValue);
-            valueObtainedLatch.countDown();
+            T value = supplier.get();
             synchronized (this) {
-                while (waitingCount > 0) {
-                    try {
-                        wait();
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
+                sharedValue = value;
+                valueObtainedLatch.countDown();
+                awaitWaitingCount(0);
                 alreadyRunning = false;
+                sharedValue = null;
             }
-            valueReference.set(null);
-            return obtainedValue;
+            return value;
         } else {
             awaitValue();
-            T obtainedValue = valueReference.get();
             synchronized (this) {
+                T value = sharedValue;
                 waitingCount--;
                 if (waitingCount == 0) {
-                    notifyAll();
+                    notify();
                 }
+                return value;
             }
-            return obtainedValue;
         }
     }
 
-    synchronized int getWaitingCount() {
-        return waitingCount;
+    synchronized void awaitWaitingCount(int expectedWaitingCount) {
+        while (waitingCount != expectedWaitingCount) {
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                throw new RuntimeException("Interrupted", e);
+            }
+        }
     }
 
     private void awaitValue() {
